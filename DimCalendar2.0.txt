@@ -1,0 +1,84 @@
+(optional Table1 as table,
+optional Table2 as table, 
+optional Table3 as table, 
+optional Table4 as table
+)=>
+
+let
+    Source = {1..4},
+    #"Converted to Table" = Table.FromList(Source, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+    #"Renamed Columns" = Table.RenameColumns(#"Converted to Table",{{"Column1", "ID"}}),
+    #"Changed Type" = Table.TransformColumnTypes(#"Renamed Columns",{{"ID", Int64.Type}}),
+    #"Added Custom" = Table.AddColumn(#"Changed Type", "Custom", each 
+if [ID] = 1 then Table1 else
+if [ID] = 2 then Table2 else
+if [ID] = 3 then Table3 else
+if [ID] = 4 then Table4 else
+null),
+   Custom2 = Table.SelectRows(#"Added Custom", each
+Type.Is(Value.Type([Custom]), type table) = true),
+    #"Added Custom1" = Table.AddColumn(Custom2, "Schema", each Table.Schema([Custom])),
+    #"Expanded Schema" = Table.ExpandTableColumn(#"Added Custom1", "Schema", {"Name", "Kind"}, {"Name", "Kind"}),
+    #"Filtered Rows" = Table.SelectRows(#"Expanded Schema", each ([Kind] = "date" or [Kind] = "datetime")),
+    #"Added Custom2" = Table.AddColumn(#"Filtered Rows", "MinDate", each Date.From(List.Min(Table.Column([Custom], [Name])))),
+    #"Added Custom3" = Table.AddColumn(#"Added Custom2", "MaxDate", each Date.From(List.Max(Table.Column([Custom], [Name])))),
+    Min = Number.From(Date.StartOfYear(List.Min(#"Added Custom3"[MinDate]))),
+    Max = Number.From(Date.EndOfYear(List.Max(#"Added Custom3"[MaxDate]))),
+    Custom1 = {Min..Max},
+    #"Converted to Table1" = Table.FromList(Custom1, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+    #"Changed Type1" = Table.TransformColumnTypes(#"Converted to Table1",{{"Column1", type date}}),
+    #"Renamed Columns1" = Table.RenameColumns(#"Changed Type1",{{"Column1", "Date"}}),
+ // Creating the column Year as well as changing the default data type from number to Int64.Type
+  #"Inserted year" = Table.AddColumn(#"Renamed Columns1", "Year", each Date.Year([Date]), Int64.Type),
+  // Creating the column Month Number as well as changing the default data type from number to Int64.Type - this will be done from now on where applicable
+  #"Inserted month" = Table.AddColumn(#"Inserted year", "MonthNo", each Date.Month([Date]), Int64.Type),
+  // Creating the column Month Name and setting it as Upper Case
+  #"Inserted month name" = Table.AddColumn(#"Inserted month", "Month", each Text.Upper(Date.MonthName([Date])), type text),
+  // Creating the column Day Number 
+  #"Inserted day" = Table.AddColumn(#"Inserted month name", "DayNo", each Date.Day([Date]), Int64.Type),
+  // Creating the column DateID
+  #"Added custom" = Table.TransformColumnTypes(Table.AddColumn(#"Inserted day", "DateID", each [Year]*10000 + [MonthNo]*100 + [DayNo]), {{"DateID", Int64.Type}}),
+  // Creating the column WholeNumberDateID
+  #"Added custom 1" = Table.AddColumn(#"Added custom", "WholeNumberDateID", each Number.From([Date]), Int64.Type),
+  // Creating the column Quarter
+  #"Inserted quarter" = Table.AddColumn(#"Added custom 1", "Quarter", each "Q" & Text.From(Date.QuarterOfYear([Date])), type text),
+  // Creating the column DayOfWeek - Date.Monday would not be necessary to put in as UK culture allows weeks starting on Monday
+  #"Inserted day of week" = Table.AddColumn(#"Inserted quarter", "DayOfWeek", each Date.DayOfWeek([Date], Day.Monday)+1, Int64.Type),
+  // Creating the column WeekOfYear
+  #"Inserted week of year" = Table.AddColumn(#"Inserted day of week", "WeekOfYear", each Date.WeekOfYear([Date]), Int64.Type),
+  // Creating the column Year-Quarter
+  #"Added custom 2" = Table.AddColumn(#"Inserted week of year", "Year-Quarter", each Text.From([Year]) & "-" & [Quarter],  type text),
+  // Creating columns ShortMonth
+  #"Added custom 3" = Table.AddColumn(#"Added custom 2", "ShortMonth", each Text.Start([Month], 3), type text),
+  // Creating the column WorkingDay
+  #"Inserted conditional column" = Table.AddColumn(#"Added custom 2", "WorkingDay", each if [DayOfWeek] <= 5 then 1 else 0, Int64.Type),
+  // Creating the column DayOfYear
+  #"Inserted day of year" = Table.AddColumn(#"Inserted conditional column", "DayOfYear", each Date.DayOfYear([Date]), Int64.Type),
+  // Creating the column Year-Month
+  #"Added custom 5" = Table.AddColumn(#"Inserted day of year", "Year-Month", each Number.ToText([Year]) & "-" & Text.End("0" & Text.From([MonthNo]),2),  type text),
+  // Creating the column CurrentYear
+  #"Added custom 6" = Table.AddColumn(#"Added custom 5", "CurrentYear", each Date.Year(DateTime.LocalNow()),  Int64.Type),
+  // Creating the column YearDeviation
+  #"Added custom 7" = Table.AddColumn(#"Added custom 6", "YearDeviation", each [Year] - [CurrentYear], Int64.Type),
+  // Creating the column CurrentMonth
+  #"Added custom 8" = Table.AddColumn(#"Added custom 7", "CurrentMonth", each Date.Month(DateTime.LocalNow()),  Int64.Type),
+  // Creating the column TodayWholeNumber - Using Number.RoundDown function because as we use afterwards a DATETIME (Date = whole number and Time = decimal part) we just want to keep the date, not the time
+  #"Added custom 9" = Table.AddColumn(#"Added custom 8", "TodayWholeNumber", each Number.RoundDown(Number.From(DateTime.LocalNow())),Int64.Type),
+  // Creating the column CurrentQuarter
+  #"Added custom 10" = Table.AddColumn(#"Added custom 9", "CurrentQuarter", each Date.QuarterOfYear(DateTime.LocalNow()), Int64.Type),
+  // Creating the column Semester
+  #"Added custom 11" = Table.AddColumn(#"Added custom 10", "Semester", each Number.RoundUp([MonthNo]/6), Int64.Type),
+  // Creating the column MonthDeviation
+  #"Added custom 12" = Table.AddColumn(#"Added custom 11", "MonthDeviation", each [MonthNo] - [CurrentMonth] + ([YearDeviation]*12), Int64.Type),
+  // Creating the column DayDeviation
+  #"Inserted subtraction" = Table.AddColumn(#"Added custom 12", "DayDeviation", each [WholeNumberDateID] - [TodayWholeNumber], Int64.Type),
+  // Creating the column ToDate
+  #"Inserted conditional column 1" = Table.AddColumn(#"Inserted subtraction", "ToDate", each if [WholeNumberDateID] <= [TodayWholeNumber] then "PAST" else "FUTURE", type text),
+  // Creating the column QuaterNo
+  #"Added custom 13" = Table.AddColumn(#"Inserted conditional column 1", "QuaterNo", each Date.QuarterOfYear([Date]), Int64.Type),
+  // Creating the column QuarterDeviation
+  #"Added custom 14" = Table.AddColumn(#"Added custom 13", "QuarterDeviation", each [QuaterNo] - [CurrentQuarter] + ([YearDeviation]*4), Int64.Type),
+  // Creating the column DayName
+  #"Inserted day name" = Table.AddColumn(#"Added custom 14", "DayName", each Date.DayOfWeekName([Date]), type text)
+in 
+  #"Inserted day name"
